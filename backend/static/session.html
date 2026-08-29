@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Study Session</title>
+    <!-- Marked.js for Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Mermaid.js for Flowchart -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@9.4.3/dist/mermaid.min.js"></script>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <h1>Study Session</h1>
+    
+    <div id="error-container"></div>
+    <button id="generate-btn" onclick="generateStudyPack()">Generate Study Pack</button>
+    
+    <div id="content-container" style="display: none;">
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('notes')">Notes</div>
+            <div class="tab" onclick="switchTab('glossary')">Glossary</div>
+            <div class="tab" onclick="switchTab('flashcards')">Flashcards</div>
+            <div class="tab" onclick="switchTab('quiz')">Quiz (<span id="score">0/0</span>)</div>
+            <div class="tab" onclick="switchTab('flowchart')">Flowchart</div>
+            <div class="tab" onclick="switchTab('bilingual')">Bilingual Notes (ES)</div>
+        </div>
+
+        <div id="notes" class="tab-content active"></div>
+        <div id="glossary" class="tab-content"></div>
+        <div id="flashcards" class="tab-content"><div class="flashcard-container" id="flashcards-container"></div></div>
+        <div id="quiz" class="tab-content"></div>
+        <div id="flowchart" class="tab-content"><div class="mermaid" id="mermaid-container"></div></div>
+        <div id="bilingual" class="tab-content"></div>
+    </div>
+
+    <!-- Modal for Source -->
+    <div id="modal-overlay" onclick="closeModal()"></div>
+    <div id="source-modal">
+        <h3>Source Text (Chunk <span id="modal-chunk-seq"></span>)</h3>
+        <p id="modal-text"></p>
+        <button onclick="closeModal()">Close</button>
+    </div>
+
+    <script>
+        // Disable auto-load before injecting actual mermaid text
+        mermaid.initialize({ startOnLoad: false });
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('id');
+        let transcriptDict = {}; // seq -> text
+
+        if (!sessionId) {
+            document.getElementById('error-container').textContent = 'No session ID provided.';
+        } else {
+            loadData();
+        }
+
+        async function loadData() {
+            try {
+                // Fetch transcript
+                const transRes = await fetch(`/sessions/${sessionId}/transcript`);
+                if (transRes.ok) {
+                    const chunks = await transRes.json();
+                    chunks.forEach(c => { transcriptDict[c.seq] = c.text; });
+                }
+
+                // Fetch study pack
+                const spRes = await fetch(`/sessions/${sessionId}/study-pack`);
+                if (spRes.status === 404) {
+                    document.getElementById('generate-btn').style.display = 'block';
+                    document.getElementById('error-container').textContent = 'Study pack not generated yet.';
+                    return;
+                }
+                if (!spRes.ok) throw new Error('Failed to load study pack');
+
+                const pack = await spRes.json();
+                renderPack(pack);
+
+            } catch (err) {
+                console.error(err);
+                document.getElementById('error-container').textContent = err.message;
+            }
+        }
+
+        async function generateStudyPack() {
+            const btn = document.getElementById('generate-btn');
+            btn.disabled = true;
+            btn.textContent = 'Generating... (This may take a minute)';
+            try {
+                const res = await fetch(`/sessions/${sessionId}/generate-study-pack`, { method: 'POST' });
+                if (!res.ok) {
+                    const errData = await res.json();
+                    throw new Error(errData.detail || 'Generation failed');
+                }
+                window.location.reload();
+            } catch (err) {
+                console.error(err);
+                document.getElementById('error-container').textContent = err.message;
+                btn.disabled = false;
+                btn.textContent = 'Generate Study Pack';
+            }
+        }
+
+        function renderPack(pack) {
+            document.getElementById('content-container').style.display = 'block';
+            document.getElementById('error-container').textContent = '';
+
+            // Notes
+            if (pack.notes_md) {
+                document.getElementById('notes').innerHTML = marked.parse(pack.notes_md);
+            }
+
+            // Bilingual
+            if (pack.bilingual_notes_md) {
+                document.getElementById('bilingual').innerHTML = marked.parse(pack.bilingual_notes_md);
+            }
+
+            // Glossary
+            if (pack.glossary_json) {
+                const glossary = JSON.parse(pack.glossary_json);
+                const gDiv = document.getElementById('glossary');
+                glossary.forEach(item => {
+                    const div = document.createElement('div');
+                    div.innerHTML = `<strong>${item.term}</strong>: ${item.definition} ` + 
+                                    `<span class="source-badge" onclick="showSource(${item.source_chunk_seq})">Source: Chunk ${item.source_chunk_seq}</span>`;
+                    div.style.marginBottom = '10px';
+                    gDiv.appendChild(div);
+                });
+            }
+
+            // Flashcards
+            if (pack.flashcards_json) {
+                const flashcards = JSON.parse(pack.flashcards_json);
+                const fContainer = document.getElementById('flashcards-container');
+                flashcards.forEach(card => {
+                    const fDiv = document.createElement('div');
+                    fDiv.className = 'flashcard';
+                    fDiv.innerHTML = `
+                        <div class="flashcard-inner">
+                            <div class="flashcard-front">
+                                <div>
+                                    <p>${card.front}</p>
+                                    <span class="source-badge" onclick="event.stopPropagation(); showSource(${card.source_chunk_seq})">Source: ${card.source_chunk_seq}</span>
+                                </div>
+                            </div>
+                            <div class="flashcard-back">
+                                <p>${card.back}</p>
+                            </div>
+                        </div>
+                    `;
+                    fDiv.onclick = () => fDiv.classList.toggle('flipped');
+                    fContainer.appendChild(fDiv);
+                });
+            }
+
+            // Quiz
+            if (pack.quiz_json) {
+                const quiz = JSON.parse(pack.quiz_json);
+                const qDiv = document.getElementById('quiz');
+                document.getElementById('score').textContent = `0/${quiz.length}`;
+                let score = 0;
+                let answered = 0;
+
+                quiz.forEach((q, idx) => {
+                    const qContainer = document.createElement('div');
+                    qContainer.className = 'quiz-question';
+                    qContainer.innerHTML = `<p><strong>Q${idx+1}:</strong> ${q.question} <span class="source-badge" onclick="showSource(${q.source_chunk_seq})">Source: ${q.source_chunk_seq}</span></p>`;
+                    
+                    const optionsDiv = document.createElement('div');
+                    let isAnswered = false;
+
+                    q.options.forEach((opt, optIdx) => {
+                        const optBtn = document.createElement('button');
+                        optBtn.className = 'quiz-option';
+                        optBtn.textContent = opt;
+                        optBtn.onclick = () => {
+                            if (isAnswered) return;
+                            isAnswered = true;
+                            answered++;
+                            if (optIdx === q.correct_index) {
+                                optBtn.classList.add('correct');
+                                score++;
+                            } else {
+                                optBtn.classList.add('incorrect');
+                                // highlight correct
+                                optionsDiv.children[q.correct_index].classList.add('correct');
+                            }
+                            document.getElementById('score').textContent = `${score}/${quiz.length}`;
+                        };
+                        optionsDiv.appendChild(optBtn);
+                    });
+                    qContainer.appendChild(optionsDiv);
+                    qDiv.appendChild(qContainer);
+                });
+            }
+
+            // Flowchart
+            if (pack.flowchart_mermaid) {
+                const fcContainer = document.getElementById('mermaid-container');
+                fcContainer.textContent = pack.flowchart_mermaid.replace(/```mermaid\n?|```/g, '');
+                fcContainer.removeAttribute('data-processed');
+                try {
+                    mermaid.init(undefined, document.querySelectorAll('.mermaid'));
+                } catch(e) {
+                    console.error("Mermaid init error:", e);
+                }
+            }
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            
+            // Find tab header by matching onclick text roughly
+            const tabs = Array.from(document.querySelectorAll('.tab'));
+            const activeTab = tabs.find(t => t.getAttribute('onclick').includes(tabId));
+            if(activeTab) activeTab.classList.add('active');
+            
+            document.getElementById(tabId).classList.add('active');
+        }
+
+        function showSource(seq) {
+            document.getElementById('modal-chunk-seq').textContent = seq;
+            document.getElementById('modal-text').textContent = transcriptDict[seq] || 'Source text not found.';
+            document.getElementById('modal-overlay').style.display = 'block';
+            document.getElementById('source-modal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('modal-overlay').style.display = 'none';
+            document.getElementById('source-modal').style.display = 'none';
+        }
+    </script>
+</body>
+</html>

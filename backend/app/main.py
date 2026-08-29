@@ -11,8 +11,9 @@ from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select, func, col
 
 from app.database import init_db, get_session
-from app.models import Class, ClassCreate, ClassSession, ClassSessionCreate, TranscriptChunk
+from app.models import Class, ClassCreate, ClassSession, ClassSessionCreate, TranscriptChunk, StudyPack
 from app.transcription import transcribe_audio
+from app.studypack import generate_study_pack_content
 
 log = logging.getLogger(__name__)
 
@@ -87,8 +88,16 @@ def create_session(payload: ClassSessionCreate, session: Session = Depends(get_s
 
 
 @app.get("/sessions", response_model=List[ClassSession])
-def list_sessions(session: Session = Depends(get_session)):
-    return session.exec(select(ClassSession)).all()
+def list_sessions(class_id: int = None, session: Session = Depends(get_session)):
+    query = select(ClassSession)
+    if class_id is not None:
+        query = query.where(ClassSession.class_id == class_id)
+    # Order by started_at desc nulls last, then id desc
+    query = query.order_by(
+        col(ClassSession.started_at).desc().nulls_last(),
+        col(ClassSession.id).desc()
+    )
+    return session.exec(query).all()
 
 
 @app.get("/sessions/{session_id}", response_model=ClassSession)
@@ -169,6 +178,83 @@ def transcribe_chunk(
         "end_ts_sec": chunk.end_ts_sec,
         "silence": False,
     }
+
+
+@app.get("/sessions/{session_id}/transcript", response_model=List[TranscriptChunk])
+def get_transcript(session_id: int, session: Session = Depends(get_session)):
+    chunks = session.exec(
+        select(TranscriptChunk)
+        .where(TranscriptChunk.session_id == session_id)
+        .order_by(TranscriptChunk.seq)
+    ).all()
+    return chunks
+
+
+# ── Study Pack ───────────────────────────────────────────────────────────
+
+@app.post("/sessions/{session_id}/generate-study-pack", response_model=StudyPack)
+def generate_study_pack(session_id: int, session: Session = Depends(get_session)):
+    cs = session.get(ClassSession, session_id)
+    if not cs:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Pull all TranscriptChunk rows for the session, ordered by seq.
+    chunks = session.exec(
+        select(TranscriptChunk)
+        .where(TranscriptChunk.session_id == session_id)
+        .order_by(TranscriptChunk.seq)
+    ).all()
+
+    chunk_dicts = [{"seq": c.seq, "text": c.text} for c in chunks]
+    
+    try:
+        pack_data = generate_study_pack_content(chunk_dicts)
+    except ValueError as e:
+        if "Insufficient content" in str(e):
+            raise HTTPException(status_code=400, detail="insufficient content")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        log.exception("Study pack generation failed for session %d", session_id)
+        raise HTTPException(status_code=502, detail=f"Generation failed: {e}")
+
+    # Store the result as a StudyPack row
+    # Delete existing if any (optional, but good for regeneration)
+    existing_pack = session.exec(
+        select(StudyPack).where(StudyPack.session_id == session_id)
+    ).first()
+    
+    if existing_pack:
+        session.delete(existing_pack)
+
+    import json
+    new_pack = StudyPack(
+        session_id=session_id,
+        notes_md=pack_data.get("notes"),
+        glossary_json=json.dumps(pack_data.get("glossary", [])),
+        flashcards_json=json.dumps(pack_data.get("flashcards", [])),
+        quiz_json=json.dumps(pack_data.get("quiz", [])),
+        flowchart_mermaid=pack_data.get("flowchart"),
+        bilingual_notes_md=pack_data.get("bilingual_notes"),
+        generated_at=func.now()
+    )
+    
+    session.add(new_pack)
+    session.commit()
+    session.refresh(new_pack)
+    
+    return new_pack
+
+
+@app.get("/sessions/{session_id}/study-pack", response_model=StudyPack)
+def get_study_pack(session_id: int, session: Session = Depends(get_session)):
+    pack = session.exec(
+        select(StudyPack).where(StudyPack.session_id == session_id)
+    ).first()
+    
+    if not pack:
+        raise HTTPException(status_code=404, detail="Study pack not found")
+        
+    return pack
 
 
 # Mount static files LAST so API routes take priority

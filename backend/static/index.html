@@ -1,217 +1,95 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Brainy Bunch – Lecture Recorder</title>
-  <style>
-    body {
-      font-family: system-ui, -apple-system, sans-serif;
-      max-width: 720px;
-      margin: 2rem auto;
-      padding: 0 1rem;
-      color: #222;
-    }
-    h1 { font-size: 1.4rem; }
-    button {
-      padding: 0.5rem 1.2rem;
-      font-size: 1rem;
-      cursor: pointer;
-      border: 1px solid #888;
-      border-radius: 4px;
-      background: #f5f5f5;
-    }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    #startBtn { background: #e8f5e9; }
-    #stopBtn  { background: #ffebee; }
-    #status {
-      margin: 1rem 0;
-      padding: 0.5rem;
-      border-radius: 4px;
-      background: #f0f0f0;
-      font-size: 0.9rem;
-    }
-    #transcript {
-      margin-top: 1rem;
-      padding: 1rem;
-      background: #fafafa;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      min-height: 120px;
-      white-space: pre-wrap;
-      font-size: 0.95rem;
-      line-height: 1.6;
-    }
-    .error { color: #c62828; }
-    .chunk-marker {
-      color: #888;
-      font-size: 0.8rem;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brainy Bunch - Classes</title>
+    <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
-  <h1>Brainy Bunch – Lecture Recorder</h1>
+    <h1>Brainy Bunch Classes</h1>
+    <div id="classes-container">Loading classes...</div>
 
-  <div>
-    <label for="classSelect">Class:</label>
-    <select id="classSelect"></select>
-  </div>
+    <script>
+        async function fetchClasses() {
+            try {
+                const res = await fetch('/classes');
+                const classes = await res.json();
+                const container = document.getElementById('classes-container');
+                container.innerHTML = '';
 
-  <div style="margin-top: 1rem;">
-    <button id="startBtn">Start Recording</button>
-    <button id="stopBtn" disabled>Stop Recording</button>
-  </div>
+                for (const cls of classes) {
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    
+                    const title = document.createElement('h3');
+                    title.textContent = `${cls.title} (${cls.subject})`;
+                    
+                    const dateP = document.createElement('p');
+                    dateP.textContent = `Date: ${cls.date}`;
+                    
+                    // Fetch latest session for this class
+                    const sessionRes = await fetch(`/sessions?class_id=${cls.id}`);
+                    const sessions = await sessionRes.json();
+                    
+                    const actionsDiv = document.createElement('div');
+                    
+                    if (sessions.length > 0) {
+                        const latestSession = sessions[0]; // Ordered by started_at desc, id desc in backend
+                        const viewBtn = document.createElement('button');
+                        viewBtn.textContent = 'View Study Session';
+                        viewBtn.onclick = () => window.location.href = `/session.html?id=${latestSession.id}`;
+                        actionsDiv.appendChild(viewBtn);
+                    } else {
+                        const noSession = document.createElement('span');
+                        noSession.textContent = 'No sessions recorded. ';
+                        actionsDiv.appendChild(noSession);
+                    }
 
-  <div id="status">Ready.</div>
-  <div id="transcript"></div>
+                    const calBtn = document.createElement('button');
+                    calBtn.textContent = 'Add to Calendar';
+                    calBtn.onclick = () => generateICS(cls.title, cls.date);
+                    actionsDiv.appendChild(calBtn);
 
-  <script>
-    const API = window.location.origin;
-
-    const classSelect  = document.getElementById('classSelect');
-    const startBtn     = document.getElementById('startBtn');
-    const stopBtn      = document.getElementById('stopBtn');
-    const statusEl     = document.getElementById('status');
-    const transcriptEl = document.getElementById('transcript');
-
-    let mediaRecorder = null;
-    let sessionId     = null;
-    let chunkIndex    = 0;
-
-    // ── Load classes into dropdown ──────────────────────────────────────
-    async function loadClasses() {
-      try {
-        const res = await fetch(`${API}/classes`);
-        const classes = await res.json();
-        classSelect.innerHTML = '';
-        classes.forEach(c => {
-          const opt = document.createElement('option');
-          opt.value = c.id;
-          opt.textContent = `${c.title} (${c.subject})`;
-          classSelect.appendChild(opt);
-        });
-      } catch (err) {
-        statusEl.textContent = 'Failed to load classes: ' + err.message;
-        statusEl.classList.add('error');
-      }
-    }
-
-    // ── Start recording ─────────────────────────────────────────────────
-    startBtn.addEventListener('click', async () => {
-      const classId = classSelect.value;
-      if (!classId) {
-        statusEl.textContent = 'Select a class first.';
-        return;
-      }
-
-      // Create a ClassSession
-      try {
-        const res = await fetch(`${API}/sessions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            class_id: parseInt(classId),
-            status: 'recording',
-          }),
-        });
-        if (!res.ok) throw new Error(await res.text());
-        const sess = await res.json();
-        sessionId = sess.id;
-        statusEl.textContent = `Session #${sessionId} created. Requesting microphone...`;
-      } catch (err) {
-        statusEl.textContent = 'Failed to create session: ' + err.message;
-        statusEl.classList.add('error');
-        return;
-      }
-
-      // Request microphone access
-      let stream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      } catch (err) {
-        statusEl.textContent = 'Microphone access denied: ' + err.message;
-        statusEl.classList.add('error');
-        return;
-      }
-
-      // Set up MediaRecorder with 25-second chunks
-      chunkIndex = 0;
-      transcriptEl.textContent = '';
-
-      // Try webm/opus first, fall back to whatever the browser supports
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : '';
-
-      mediaRecorder = mimeType
-        ? new MediaRecorder(stream, { mimeType })
-        : new MediaRecorder(stream);
-
-      mediaRecorder.ondataavailable = async (event) => {
-        if (event.data.size === 0) return;
-
-        chunkIndex++;
-        const idx = chunkIndex;
-        statusEl.textContent = `Sending chunk #${idx} for transcription...`;
-
-        const formData = new FormData();
-        const ext = mediaRecorder.mimeType.includes('webm') ? 'webm' : 'ogg';
-        formData.append('audio', event.data, `chunk_${idx}.${ext}`);
-
-        try {
-          const res = await fetch(`${API}/sessions/${sessionId}/transcribe-chunk`, {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (!res.ok) {
-            const errText = await res.text();
-            transcriptEl.innerHTML +=
-              `<span class="error">[chunk ${idx} error: ${errText}]</span>\n`;
-            statusEl.textContent = `Chunk #${idx} failed (still recording).`;
-            return;
-          }
-
-          const result = await res.json();
-
-          if (result.silence) {
-            statusEl.textContent = `Chunk #${idx}: silence (skipped). Recording...`;
-          } else {
-            transcriptEl.textContent += result.text + ' ';
-            statusEl.textContent = `Chunk #${idx} transcribed. Recording...`;
-          }
-        } catch (err) {
-          transcriptEl.innerHTML +=
-            `<span class="error">[chunk ${idx} network error: ${err.message}]</span>\n`;
-          statusEl.textContent = `Chunk #${idx} network error (still recording).`;
+                    card.appendChild(title);
+                    card.appendChild(dateP);
+                    card.appendChild(actionsDiv);
+                    container.appendChild(card);
+                }
+            } catch (err) {
+                console.error(err);
+                document.getElementById('classes-container').textContent = 'Error loading classes.';
+            }
         }
-      };
 
-      mediaRecorder.onstop = () => {
-        stream.getTracks().forEach(t => t.stop());
-        statusEl.textContent = `Recording stopped. ${chunkIndex} chunk(s) sent.`;
-      };
+        function generateICS(title, dateStr) {
+            // Very simple ICS generator
+            const dateParts = dateStr.split('-');
+            if(dateParts.length !== 3) return alert('Invalid date');
+            const yyyymmdd = dateParts.join('') + 'T090000Z'; // default 9am UTC
+            
+            const icsData = [
+                'BEGIN:VCALENDAR',
+                'VERSION:2.0',
+                'BEGIN:VEVENT',
+                `DTSTART:${yyyymmdd}`,
+                `SUMMARY:${title}`,
+                'END:VEVENT',
+                'END:VCALENDAR'
+            ].join('\n');
 
-      // Start recording, fire ondataavailable every 25 seconds
-      mediaRecorder.start(25000);
+            const blob = new Blob([icsData], { type: 'text/calendar' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${title.replace(/\s+/g, '_')}.ics`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
 
-      startBtn.disabled = true;
-      stopBtn.disabled  = false;
-      statusEl.textContent = `Recording session #${sessionId}... (chunks every 25s)`;
-      statusEl.classList.remove('error');
-    });
-
-    // ── Stop recording ──────────────────────────────────────────────────
-    stopBtn.addEventListener('click', () => {
-      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop();
-      }
-      startBtn.disabled = false;
-      stopBtn.disabled  = true;
-    });
-
-    // ── Init ────────────────────────────────────────────────────────────
-    loadClasses();
-  </script>
+        fetchClasses();
+    </script>
 </body>
 </html>
