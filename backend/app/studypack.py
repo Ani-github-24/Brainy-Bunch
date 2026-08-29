@@ -35,7 +35,7 @@ class StudyPackResponse(BaseModel):
     flowchart: str = Field(description="A Mermaid flowchart string visualizing the concepts")
 
 
-def generate_study_pack_content(transcript_chunks: list[dict]) -> dict:
+def generate_study_pack_content(transcript_chunks: list[dict]) -> tuple[dict, int, int]:
     """Send transcript chunks to Gemini and get a structured StudyPackResponse."""
     
     # Check if there is enough content
@@ -65,7 +65,16 @@ def generate_study_pack_content(transcript_chunks: list[dict]) -> dict:
     )
 
     try:
-        return json.loads(response.text)
+        pack_data = json.loads(response.text)
+        
+        # Safely extract token counts
+        input_tokens = 0
+        output_tokens = 0
+        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+            input_tokens = getattr(response.usage_metadata, 'prompt_token_count', 0)
+            output_tokens = getattr(response.usage_metadata, 'candidates_token_count', 0)
+            
+        return pack_data, input_tokens, output_tokens
     except json.JSONDecodeError as e:
         log.error("Failed to decode JSON from Gemini: %s", response.text)
         raise e

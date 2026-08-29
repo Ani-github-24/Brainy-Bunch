@@ -51,6 +51,8 @@ class StudyPack(SQLModel, table=True):
     flashcards_json: Optional[str] = None
     quiz_json: Optional[str] = None
     flowchart_mermaid: str | None = Field(default=None)
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
     generated_at: Optional[datetime] = None
 
 

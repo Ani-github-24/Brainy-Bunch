@@ -16,6 +16,8 @@
     <div id="error-container"></div>
     <button id="generate-btn" onclick="generateStudyPack()">Generate Study Pack</button>
     
+    <div id="impact-panel" style="display: none; background: var(--surface-color); border: 1px solid var(--primary-color); padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);"></div>
+
     <div id="content-container" style="display: none;">
         <div class="tabs">
             <div class="tab active" onclick="switchTab('notes')">
@@ -70,7 +72,12 @@
                 const transRes = await fetch(`/sessions/${sessionId}/transcript`);
                 if (transRes.ok) {
                     const chunks = await transRes.json();
-                    chunks.forEach(c => { transcriptDict[c.seq] = c.text; });
+                    let maxTs = 0;
+                    chunks.forEach(c => { 
+                        transcriptDict[c.seq] = c.text; 
+                        if (c.end_ts_sec > maxTs) maxTs = c.end_ts_sec;
+                    });
+                    window.maxEndTsSec = maxTs;
                 }
 
                 // Fetch study pack
@@ -115,6 +122,32 @@
         function renderPack(pack) {
             document.getElementById('content-container').style.display = 'block';
             document.getElementById('error-container').textContent = '';
+
+            // Render Impact Panel
+            const impactPanel = document.getElementById('impact-panel');
+            let impactHtml = `<h3 style="margin-bottom: 10px; color: var(--text-main);">Study Pack Impact</h3>`;
+            
+            let lectureMinutes = (window.maxEndTsSec || 0) / 60;
+            // Assumption: manual note-taking and flashcard creation takes roughly 3x the lecture length
+            let savedMinutes = (lectureMinutes * 3) - 1; // Subtracting ~1 min for generation time
+            if (savedMinutes < 0) savedMinutes = 0;
+            
+            impactHtml += `<p style="margin: 5px 0; font-size: 1.05em;"><strong>Estimated time saved:</strong> ${Math.round(savedMinutes)} minutes</p>`;
+            impactHtml += `<p style="margin: 0 0 15px 0; font-size: 0.85em; color: var(--text-muted);">*Assumption: manual note-taking and material creation typically takes roughly 3x the lecture's length.</p>`;
+
+            if (pack.input_tokens != null && pack.output_tokens != null) {
+                // Gemini Flash pricing: $0.075 / 1M input, $0.30 / 1M output
+                const inputCost = (pack.input_tokens / 1000000) * 0.075;
+                const outputCost = (pack.output_tokens / 1000000) * 0.30;
+                const totalCost = inputCost + outputCost;
+                
+                impactHtml += `<p style="margin: 5px 0; font-size: 1.05em;"><strong>Generation cost:</strong> $${totalCost.toFixed(4)} for this entire class.</p>`;
+            } else {
+                impactHtml += `<p style="margin: 5px 0; font-size: 1.05em;"><strong>Generation cost:</strong> (Cost data unavailable for this older session)</p>`;
+            }
+
+            impactPanel.innerHTML = impactHtml;
+            impactPanel.style.display = 'block';
 
             // Notes
             if (pack.notes_md) {

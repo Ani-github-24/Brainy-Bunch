@@ -258,7 +258,7 @@ def generate_study_pack(session_id: int, session: Session = Depends(get_session)
     chunk_dicts = [{"seq": c.seq, "text": c.text} for c in chunks]
     
     try:
-        pack_data = generate_study_pack_content(chunk_dicts)
+        pack_data, input_tokens, output_tokens = generate_study_pack_content(chunk_dicts)
     except ValueError as e:
         if "Insufficient content" in str(e):
             raise HTTPException(status_code=400, detail="insufficient content")
@@ -284,6 +284,8 @@ def generate_study_pack(session_id: int, session: Session = Depends(get_session)
         flashcards_json=json.dumps(pack_data.get("flashcards", [])),
         quiz_json=json.dumps(pack_data.get("quiz", [])),
         flowchart_mermaid=pack_data.get("flowchart"),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
         generated_at=func.now()
     )
     
