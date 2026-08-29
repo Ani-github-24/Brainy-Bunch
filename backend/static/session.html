@@ -126,11 +126,15 @@
             if (pack.glossary_json) {
                 const glossary = JSON.parse(pack.glossary_json);
                 const gDiv = document.getElementById('glossary');
+                gDiv.innerHTML = ''; // clear any existing
                 glossary.forEach(item => {
                     const div = document.createElement('div');
-                    div.innerHTML = `<strong>${item.term}</strong>: ${item.definition} ` + 
-                                    `<span class="source-badge" onclick="showSource(${item.source_chunk_seq})">Source: Chunk ${item.source_chunk_seq}</span>`;
-                    div.style.marginBottom = '10px';
+                    div.className = 'glossary-card';
+                    div.innerHTML = `
+                        <div class="glossary-term">${item.term}</div>
+                        <p class="glossary-def">${item.definition}</p>
+                        <span class="source-badge" onclick="showSource(${item.source_chunk_seq})">Source: Chunk ${item.source_chunk_seq}</span>
+                    `;
                     gDiv.appendChild(div);
                 });
             }
