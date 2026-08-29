@@ -18,12 +18,21 @@
     
     <div id="content-container" style="display: none;">
         <div class="tabs">
-            <div class="tab active" onclick="switchTab('notes')">Notes</div>
+            <div class="tab active" onclick="switchTab('notes')">
+                Notes
+                <select id="lang-select" onclick="event.stopPropagation()" onchange="changeNotesLanguage()" style="margin-left: 10px; padding: 2px; border-radius: 4px;">
+                    <option value="en" selected>English</option>
+                    <option value="ta">Tamil</option>
+                    <option value="te">Telugu</option>
+                    <option value="ml">Malayalam</option>
+                    <option value="hi">Hindi</option>
+                    <option value="es">Spanish</option>
+                </select>
+            </div>
             <div class="tab" onclick="switchTab('glossary')">Glossary</div>
             <div class="tab" onclick="switchTab('flashcards')">Flashcards</div>
             <div class="tab" onclick="switchTab('quiz')">Quiz (<span id="score">0/0</span>)</div>
             <div class="tab" onclick="switchTab('flowchart')">Flowchart</div>
-            <div class="tab" onclick="switchTab('bilingual')">Bilingual Notes (ES)</div>
         </div>
 
         <div id="notes" class="tab-content active"></div>
@@ -31,7 +40,6 @@
         <div id="flashcards" class="tab-content"><div class="flashcard-container" id="flashcards-container"></div></div>
         <div id="quiz" class="tab-content"></div>
         <div id="flowchart" class="tab-content"><div class="mermaid" id="mermaid-container"></div></div>
-        <div id="bilingual" class="tab-content"></div>
     </div>
 
     <!-- Modal for Source -->
@@ -102,18 +110,16 @@
             }
         }
 
+        let currentNotesMd = "";
+
         function renderPack(pack) {
             document.getElementById('content-container').style.display = 'block';
             document.getElementById('error-container').textContent = '';
 
             // Notes
             if (pack.notes_md) {
+                currentNotesMd = pack.notes_md;
                 document.getElementById('notes').innerHTML = marked.parse(pack.notes_md);
-            }
-
-            // Bilingual
-            if (pack.bilingual_notes_md) {
-                document.getElementById('bilingual').innerHTML = marked.parse(pack.bilingual_notes_md);
             }
 
             // Glossary
@@ -230,6 +236,27 @@
         function closeModal() {
             document.getElementById('modal-overlay').style.display = 'none';
             document.getElementById('source-modal').style.display = 'none';
+        }
+
+        async function changeNotesLanguage() {
+            const lang = document.getElementById('lang-select').value;
+            const notesDiv = document.getElementById('notes');
+            
+            if (lang === 'en') {
+                notesDiv.innerHTML = marked.parse(currentNotesMd);
+                return;
+            }
+
+            notesDiv.innerHTML = "<p><em>Loading translation...</em></p>";
+            try {
+                const res = await fetch(`/sessions/${sessionId}/translate?lang=${lang}`, { method: 'POST' });
+                if (!res.ok) throw new Error("Translation failed");
+                const data = await res.json();
+                notesDiv.innerHTML = marked.parse(data.translated_md);
+            } catch (err) {
+                console.error(err);
+                notesDiv.innerHTML = `<p style="color:var(--danger-border)">Error: ${err.message}</p>`;
+            }
         }
     </script>
 </body>

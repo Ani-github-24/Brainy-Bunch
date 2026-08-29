@@ -234,7 +234,6 @@ def generate_study_pack(session_id: int, session: Session = Depends(get_session)
         flashcards_json=json.dumps(pack_data.get("flashcards", [])),
         quiz_json=json.dumps(pack_data.get("quiz", [])),
         flowchart_mermaid=pack_data.get("flowchart"),
-        bilingual_notes_md=pack_data.get("bilingual_notes"),
         generated_at=func.now()
     )
     
@@ -255,6 +254,48 @@ def get_study_pack(session_id: int, session: Session = Depends(get_session)):
         raise HTTPException(status_code=404, detail="Study pack not found")
         
     return pack
+
+@app.post("/sessions/{session_id}/translate")
+def translate_study_pack(session_id: int, lang: str, session: Session = Depends(get_session)):
+    from app.models import TranslationCache
+    from app.studypack import translate_notes
+
+    # Verify session and study pack exist
+    pack = session.exec(
+        select(StudyPack).where(StudyPack.session_id == session_id)
+    ).first()
+    
+    if not pack or not pack.notes_md:
+        raise HTTPException(status_code=404, detail="Study pack notes not found for this session")
+
+    # Check cache
+    cached = session.exec(
+        select(TranslationCache).where(
+            TranslationCache.session_id == session_id,
+            TranslationCache.lang == lang
+        )
+    ).first()
+
+    if cached:
+        return {"translated_md": cached.translated_md}
+
+    # Not cached, hit Gemini
+    try:
+        translated_md = translate_notes(pack.notes_md, lang)
+    except Exception as e:
+        log.exception("Translation failed for session %d, lang %s", session_id, lang)
+        raise HTTPException(status_code=502, detail=f"Translation failed: {e}")
+
+    # Save to cache
+    new_cache = TranslationCache(
+        session_id=session_id,
+        lang=lang,
+        translated_md=translated_md
+    )
+    session.add(new_cache)
+    session.commit()
+
+    return {"translated_md": translated_md}
 
 
 # Mount static files LAST so API routes take priority

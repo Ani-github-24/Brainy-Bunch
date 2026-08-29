@@ -33,7 +33,6 @@ class StudyPackResponse(BaseModel):
     flashcards: list[Flashcard] = Field(description="A list of flashcards")
     quiz: list[QuizQuestion] = Field(description="A list of quiz questions")
     flowchart: str = Field(description="A Mermaid flowchart string visualizing the concepts")
-    bilingual_notes: str = Field(description="The notes translated into Spanish, formatted in Markdown")
 
 
 def generate_study_pack_content(transcript_chunks: list[dict]) -> dict:
@@ -52,8 +51,7 @@ def generate_study_pack_content(transcript_chunks: list[dict]) -> dict:
         "Generate a comprehensive study pack based ONLY on the provided transcript. Do not invent "
         "information outside of the transcript. "
         "For each glossary term, flashcard, and quiz question, you MUST accurately include the 'source_chunk_seq' "
-        "which is the sequence number of the chunk that provided the information. \n"
-        "For the bilingual_notes field, provide the exact same notes translated into Spanish.\n\n"
+        "which is the sequence number of the chunk that provided the information. \n\n"
         f"Transcript:\n{combined_text}"
     )
 
@@ -71,3 +69,16 @@ def generate_study_pack_content(transcript_chunks: list[dict]) -> dict:
     except json.JSONDecodeError as e:
         log.error("Failed to decode JSON from Gemini: %s", response.text)
         raise e
+
+def translate_notes(notes_md: str, target_lang: str) -> str:
+    """Translate markdown notes into the target language."""
+    client = get_gemini_client()
+    
+    prompt = f"Translate the following educational notes into {target_lang}. Keep the Markdown formatting intact:\n\n{notes_md}"
+    
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=prompt
+    )
+    
+    return response.text

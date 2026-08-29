@@ -49,9 +49,14 @@ class StudyPack(SQLModel, table=True):
     glossary_json: Optional[str] = None
     flashcards_json: Optional[str] = None
     quiz_json: Optional[str] = None
-    flowchart_mermaid: Optional[str] = None
-    bilingual_notes_md: Optional[str] = None
+    flowchart_mermaid: str | None = Field(default=None)
     generated_at: Optional[datetime] = None
+
+
+class TranslationCache(SQLModel, table=True):
+    session_id: int = Field(foreign_key="classsession.id", primary_key=True)
+    lang: str = Field(primary_key=True)
+    translated_md: str
 
 
 # ── Request schemas (non-table, Pydantic validation runs on these) ───────
