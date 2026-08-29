@@ -210,11 +210,6 @@
                 const fcContainer = document.getElementById('mermaid-container');
                 fcContainer.textContent = pack.flowchart_mermaid.replace(/```mermaid\n?|```/g, '');
                 fcContainer.removeAttribute('data-processed');
-                try {
-                    mermaid.init(undefined, document.querySelectorAll('.mermaid'));
-                } catch(e) {
-                    console.error("Mermaid init error:", e);
-                }
             }
         }
 
@@ -228,6 +223,14 @@
             if(activeTab) activeTab.classList.add('active');
             
             document.getElementById(tabId).classList.add('active');
+
+            if (tabId === 'flowchart') {
+                try {
+                    mermaid.init(undefined, document.querySelectorAll('#mermaid-container'));
+                } catch(e) {
+                    console.error("Mermaid init error:", e);
+                }
+            }
         }
 
         function showSource(seq) {
