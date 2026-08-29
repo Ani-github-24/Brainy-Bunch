@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teacher Dashboard - Brainy Bunch</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <style>
+        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+        .question-card { background: var(--surface-color); border: 1px solid var(--border-color); padding: 15px; border-radius: 8px; margin-bottom: 15px; }
+        .question-time { color: var(--text-muted); font-size: 0.9em; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Teacher Dashboard: Flagged Questions</h1>
+        <div id="session-selector" style="display: none; margin-bottom: 20px;">
+            <input type="number" id="session-id-input" placeholder="Enter Session ID">
+            <button onclick="loadSession()">View Questions</button>
+        </div>
+        <div id="questions-list"><p>Loading...</p></div>
+    </div>
+
+    <script>
+        let sessionId = new URLSearchParams(window.location.search).get('id');
+        
+        if (!sessionId) {
+            document.getElementById('session-selector').style.display = 'block';
+            document.getElementById('questions-list').innerHTML = '<p>Please enter a session ID above.</p>';
+        } else {
+            startPolling();
+        }
+
+        function loadSession() {
+            const val = document.getElementById('session-id-input').value;
+            if (val) {
+                window.location.href = `/teacher.html?id=${val}`;
+            }
+        }
+
+        async function fetchQuestions() {
+            if (!sessionId) return;
+            try {
+                const res = await fetch(`/sessions/${sessionId}/flagged-questions`);
+                if (res.ok) {
+                    const questions = await res.json();
+                    renderQuestions(questions);
+                }
+            } catch (e) {
+                console.error("Failed to fetch questions", e);
+            }
+        }
+
+        function renderQuestions(questions) {
+            const list = document.getElementById('questions-list');
+            if (questions.length === 0) {
+                list.innerHTML = '<p style="color: var(--text-muted);">No open questions.</p>';
+                return;
+            }
+            list.innerHTML = '';
+            questions.forEach(q => {
+                const card = document.createElement('div');
+                card.className = 'question-card';
+                
+                // Format time nicely
+                let timeStr = "";
+                if (q.created_at) {
+                    // created_at might end with Z or not depending on fastAPI serialization. 
+                    // Let's just create a Date object
+                    const d = new Date(q.created_at + (!q.created_at.endsWith('Z') ? 'Z' : ''));
+                    timeStr = d.toLocaleTimeString();
+                }
+
+                card.innerHTML = `
+                    <div class="question-time">${timeStr}</div>
+                    <div style="font-size: 1.1em; color: white;">${q.question_text}</div>
+                `;
+                list.appendChild(card);
+            });
+        }
+
+        function startPolling() {
+            fetchQuestions();
+            setInterval(fetchQuestions, 5000);
+        }
+    </script>
+</body>
+</html>

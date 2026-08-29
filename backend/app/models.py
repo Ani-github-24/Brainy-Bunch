@@ -60,6 +60,15 @@ class TranslationCache(SQLModel, table=True):
     translated_md: str
 
 
+class FlaggedQuestion(SQLModel, table=True):
+    """A question flagged for the teacher during a session."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: int = Field(foreign_key="classsession.id")
+    question_text: str
+    status: str = Field(default="open")
+    created_at: Optional[datetime] = Field(default_factory=datetime.utcnow)
+
+
 # ── Request schemas (non-table, Pydantic validation runs on these) ───────
 #
 # SQLModel table=True classes skip Pydantic coercion in __init__, so an
@@ -89,4 +98,13 @@ class ManualNoteCreate(SQLModel):
     """Request body for creating a manual note chunk."""
 
     text: str
+
+
+class FlaggedQuestionCreate(SQLModel):
+    """Request body for flagging a question."""
+    question_text: str
+
+class ChatRequest(SQLModel):
+    """Request body for AI chat."""
+    question: str
 

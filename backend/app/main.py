@@ -14,6 +14,8 @@ from app.database import init_db, get_session
 from app.models import Class, ClassCreate, ClassSession, ClassSessionCreate, TranscriptChunk, StudyPack, ManualNoteCreate
 from app.transcription import transcribe_audio
 from app.studypack import generate_study_pack_content
+from app.feature_chat import chat_router
+from fastapi.responses import HTMLResponse
 
 log = logging.getLogger(__name__)
 
@@ -345,6 +347,14 @@ def translate_study_pack(session_id: int, lang: str, session: Session = Depends(
 
     return {"translated_md": translated_md}
 
+app.include_router(chat_router)
+
+@app.get("/record.html")
+def get_record_html():
+    content = (STATIC_DIR / "record.html").read_text()
+    injection = "<script src='/chat_panel.js'></script></body>"
+    content = content.replace("</body>", injection)
+    return HTMLResponse(content)
 
 # Mount static files LAST so API routes take priority
 app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
