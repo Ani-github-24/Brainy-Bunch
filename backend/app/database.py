@@ -1,11 +1,19 @@
 """Database engine, session management, and initialisation."""
 
 import os
+import shutil
 from sqlmodel import SQLModel, Session, create_engine
 
 # On Vercel, the filesystem is read-only except for /tmp.
 if os.getenv("VERCEL"):
-    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:////tmp/brainy_bunch.db")
+    tmp_db = "/tmp/brainy_bunch.db"
+    local_db = "./brainy_bunch.db"
+    
+    # Copy the bundled test data to /tmp on cold start if it exists
+    if not os.path.exists(tmp_db) and os.path.exists(local_db):
+        shutil.copy2(local_db, tmp_db)
+        
+    DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{tmp_db}")
 else:
     DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./brainy_bunch.db")
 
