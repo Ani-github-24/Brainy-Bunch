@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select, func, col
 
 from app.database import init_db, get_session
-from app.models import Class, ClassCreate, ClassSession, ClassSessionCreate, TranscriptChunk, StudyPack
+from app.models import Class, ClassCreate, ClassSession, ClassSessionCreate, TranscriptChunk, StudyPack, ManualNoteCreate
 from app.transcription import transcribe_audio
 from app.studypack import generate_study_pack_content
 
@@ -175,6 +175,56 @@ def transcribe_chunk(
         "start_ts_sec": chunk.start_ts_sec,
         "end_ts_sec": chunk.end_ts_sec,
         "silence": False,
+    }
+
+
+@app.post("/sessions/{session_id}/manual-note")
+def create_manual_note(
+    session_id: int,
+    payload: ManualNoteCreate,
+    session: Session = Depends(get_session),
+):
+    """Receive a manual note and store it as a TranscriptChunk."""
+    # Verify session exists
+    cs = session.get(ClassSession, session_id)
+    if not cs:
+        raise HTTPException(status_code=404, detail="ClassSession not found")
+        
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Note cannot be empty")
+
+    # Compute next seq number and timestamp range
+    max_seq_result = session.exec(
+        select(func.max(col(TranscriptChunk.seq))).where(
+            TranscriptChunk.session_id == session_id
+        )
+    ).one()
+    next_seq = (max_seq_result or 0) + 1
+
+    # Keep timestamps consistent with sequence progression
+    start_ts = (next_seq - 1) * CHUNK_DURATION_SEC
+    end_ts = next_seq * CHUNK_DURATION_SEC
+
+    chunk = TranscriptChunk(
+        session_id=session_id,
+        seq=next_seq,
+        start_ts_sec=start_ts,
+        end_ts_sec=end_ts,
+        text=text,
+        source="manual"
+    )
+    session.add(chunk)
+    session.commit()
+    session.refresh(chunk)
+
+    return {
+        "session_id": session_id,
+        "seq": chunk.seq,
+        "text": chunk.text,
+        "start_ts_sec": chunk.start_ts_sec,
+        "end_ts_sec": chunk.end_ts_sec,
+        "source": chunk.source
     }
 
 

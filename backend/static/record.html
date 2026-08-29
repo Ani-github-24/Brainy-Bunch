@@ -14,6 +14,7 @@
         .form-group input, .form-group select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: white; }
         #live-transcript { background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; height: 300px; overflow-y: auto; padding: 15px; margin-top: 20px; font-family: monospace; }
         .chunk { margin-bottom: 10px; padding: 10px; border-radius: 6px; background: rgba(99, 102, 241, 0.1); border-left: 3px solid var(--primary-color); }
+        .manual-chunk { background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10b981; }
         .recording-indicator { display: none; color: var(--secondary-color); font-weight: bold; animation: pulse 1.5s infinite; margin-bottom: 15px; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
@@ -58,6 +59,13 @@
         <!-- Recording Section -->
         <div class="recording-section" id="recording-section">
             <div class="recording-indicator" id="recording-indicator">🔴 RECORDING IN PROGRESS</div>
+            
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label>Manual Notes</label>
+                <textarea id="manual-note-input" rows="3" style="width: 100%; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: white; margin-bottom: 10px; font-family: inherit;" placeholder="Type a note here and press Submit..."></textarea>
+                <button onclick="submitManualNote()" style="width: 100%; padding: 10px;">Submit Note</button>
+            </div>
+
             <h2>Live Transcript</h2>
             <p style="color: var(--text-muted)">Audio is being chunked and sent to the server every ~25 seconds.</p>
             <div id="live-transcript"></div>
@@ -186,13 +194,41 @@
             }
         }
 
-        function appendTranscript(seq, text) {
+        function appendTranscript(seq, text, source = 'audio') {
             const container = document.getElementById('live-transcript');
             const div = document.createElement('div');
-            div.className = 'chunk';
-            div.innerHTML = `<strong>[Chunk ${seq}]</strong>: ${text}`;
+            div.className = source === 'manual' ? 'chunk manual-chunk' : 'chunk';
+            div.innerHTML = `<strong>[Chunk ${seq}${source === 'manual' ? ' - Manual Note' : ''}]</strong>: ${text}`;
             container.appendChild(div);
             container.scrollTop = container.scrollHeight;
+        }
+
+        async function submitManualNote() {
+            if (!activeSessionId) return;
+            const input = document.getElementById('manual-note-input');
+            const text = input.value.trim();
+            if (!text) return;
+            
+            input.disabled = true;
+            try {
+                const res = await fetch(`/sessions/${activeSessionId}/manual-note`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ text })
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    appendTranscript(data.seq, data.text, data.source);
+                    input.value = '';
+                } else {
+                    console.error("Failed to submit manual note");
+                }
+            } catch (e) {
+                console.error("Error submitting manual note:", e);
+            } finally {
+                input.disabled = false;
+                input.focus();
+            }
         }
 
         let isStopping = false;

@@ -38,6 +38,7 @@ class TranscriptChunk(SQLModel, table=True):
     start_ts_sec: float
     end_ts_sec: float
     text: str
+    source: str = Field(default="audio")
 
 
 class StudyPack(SQLModel, table=True):
@@ -82,4 +83,10 @@ class ClassSessionCreate(SQLModel):
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     status: str = "pending"
+
+
+class ManualNoteCreate(SQLModel):
+    """Request body for creating a manual note chunk."""
+
+    text: str
 
