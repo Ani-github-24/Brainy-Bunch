@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 
 from google import genai
 from google.genai import types
@@ -15,6 +16,17 @@ TRANSCRIBE_PROMPT = (
     "Output only the spoken words, no commentary, no formatting, no timestamps. "
     "If the audio is silent or contains no speech, respond with exactly: [SILENCE]"
 )
+
+
+def scrub_pii(text: str) -> str:
+    """Detect and redact email addresses and phone numbers."""
+    if not text:
+        return text
+    # Email regex
+    text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b', '[REDACTED]', text)
+    # Phone regex
+    text = re.sub(r'(?<!\d)(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)', '[REDACTED]', text)
+    return text
 
 
 def get_gemini_client() -> genai.Client:
@@ -55,4 +67,4 @@ def transcribe_audio(audio_bytes: bytes, mime_type: str = "audio/webm") -> str |
         log.info("Chunk transcribed to silence / near-empty, skipping.")
         return None
 
-    return text
+    return scrub_pii(text)
