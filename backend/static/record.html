@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Record Session - Brainy Bunch</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <style>
+        #record-container { max-width: 800px; margin: 0 auto; }
+        .setup-section, .recording-section { background: var(--surface-color); border: 1px solid var(--border-color); padding: 30px; border-radius: 12px; margin-bottom: 20px; }
+        .recording-section { display: none; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: var(--text-muted); }
+        .form-group input, .form-group select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-color); color: white; }
+        #live-transcript { background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; height: 300px; overflow-y: auto; padding: 15px; margin-top: 20px; font-family: monospace; }
+        .chunk { margin-bottom: 10px; padding: 10px; border-radius: 6px; background: rgba(99, 102, 241, 0.1); border-left: 3px solid var(--primary-color); }
+        .recording-indicator { display: none; color: var(--secondary-color); font-weight: bold; animation: pulse 1.5s infinite; margin-bottom: 15px; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+    <h1>Record New Session</h1>
+    
+    <div id="record-container">
+        <div id="error-container"></div>
+        
+        <!-- Setup Section -->
+        <div class="setup-section" id="setup-section">
+            <h2>1. Select or Create Class</h2>
+            <div class="form-group">
+                <label>Existing Class</label>
+                <select id="class-select">
+                    <option value="">-- Create New Class Below --</option>
+                </select>
+            </div>
+            
+            <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+            
+            <div id="new-class-form">
+                <h3>Or Create New Class</h3>
+                <div class="form-group">
+                    <label>Title</label>
+                    <input type="text" id="new-title" placeholder="e.g. Linear Algebra 101">
+                </div>
+                <div class="form-group">
+                    <label>Subject</label>
+                    <input type="text" id="new-subject" placeholder="e.g. Math">
+                </div>
+                <div class="form-group">
+                    <label>Date</label>
+                    <input type="date" id="new-date">
+                </div>
+            </div>
+
+            <button onclick="startSession()" style="margin-top: 20px; width: 100%; padding: 15px; font-size: 1.1em;">Start Recording</button>
+        </div>
+
+        <!-- Recording Section -->
+        <div class="recording-section" id="recording-section">
+            <div class="recording-indicator" id="recording-indicator">🔴 RECORDING IN PROGRESS</div>
+            <h2>Live Transcript</h2>
+            <p style="color: var(--text-muted)">Audio is being chunked and sent to the server every ~25 seconds.</p>
+            <div id="live-transcript"></div>
+            
+            <button onclick="stopSession()" id="stop-btn" style="background: var(--secondary-color); margin-top: 20px; width: 100%; padding: 15px; font-size: 1.1em;">Stop & Finish</button>
+            <p id="saving-msg" style="display: none; text-align: center; margin-top: 10px; color: var(--text-muted);">Waiting for final chunks to process...</p>
+        </div>
+    </div>
+
+    <script>
+        let mediaRecorder = null;
+        let activeSessionId = null;
+        let pendingUploads = 0;
+
+        // Init page
+        async function loadClasses() {
+            try {
+                const res = await fetch('/classes');
+                const classes = await res.json();
+                const select = document.getElementById('class-select');
+                classes.forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c.id;
+                    opt.textContent = `${c.title} (${c.subject}) - ${c.date}`;
+                    select.appendChild(opt);
+                });
+                document.getElementById('new-date').valueAsDate = new Date();
+            } catch (e) {
+                showError("Failed to load classes: " + e.message);
+            }
+        }
+        loadClasses();
+
+        function showError(msg) {
+            document.getElementById('error-container').textContent = msg;
+        }
+
+        async function startSession() {
+            showError("");
+            let classId = document.getElementById('class-select').value;
+            
+            // If no existing class selected, create one
+            if (!classId) {
+                const title = document.getElementById('new-title').value;
+                const subject = document.getElementById('new-subject').value;
+                const date = document.getElementById('new-date').value;
+                if (!title || !subject || !date) {
+                    return showError("Please select a class or fill out all New Class fields.");
+                }
+                try {
+                    const res = await fetch('/classes', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ title, subject, date })
+                    });
+                    if (!res.ok) throw new Error("Failed to create class");
+                    const newClass = await res.json();
+                    classId = newClass.id;
+                } catch (e) {
+                    return showError(e.message);
+                }
+            }
+
+            // Create Session
+            try {
+                const res = await fetch('/sessions', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ class_id: parseInt(classId), status: 'recording' })
+                });
+                if (!res.ok) throw new Error("Failed to create session");
+                const sessionData = await res.json();
+                activeSessionId = sessionData.id;
+                
+                startRecording();
+            } catch (e) {
+                showError(e.message);
+            }
+        }
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                
+                mediaRecorder.ondataavailable = async (e) => {
+                    if (e.data.size > 0) {
+                        uploadChunk(e.data);
+                    }
+                };
+
+                // Request data every 25 seconds
+                mediaRecorder.start(25000);
+
+                document.getElementById('setup-section').style.display = 'none';
+                document.getElementById('recording-section').style.display = 'block';
+                document.getElementById('recording-indicator').style.display = 'block';
+            } catch (e) {
+                showError("Microphone access denied or not available: " + e.message);
+            }
+        }
+
+        async function uploadChunk(blob) {
+            if (!activeSessionId) return;
+            pendingUploads++;
+            
+            const formData = new FormData();
+            formData.append('audio', blob, 'chunk.webm');
+
+            try {
+                const res = await fetch(`/sessions/${activeSessionId}/transcribe-chunk`, {
+                    method: 'POST',
+                    body: formData
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (!data.silence && data.text) {
+                        appendTranscript(data.seq, data.text);
+                    }
+                }
+            } catch (e) {
+                console.error("Chunk upload failed:", e);
+            } finally {
+                pendingUploads--;
+                checkFinish();
+            }
+        }
+
+        function appendTranscript(seq, text) {
+            const container = document.getElementById('live-transcript');
+            const div = document.createElement('div');
+            div.className = 'chunk';
+            div.innerHTML = `<strong>[Chunk ${seq}]</strong>: ${text}`;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        let isStopping = false;
+        function stopSession() {
+            if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+            isStopping = true;
+            document.getElementById('stop-btn').disabled = true;
+            document.getElementById('recording-indicator').style.display = 'none';
+            document.getElementById('saving-msg').style.display = 'block';
+            
+            mediaRecorder.stop();
+            // Stop all tracks to release mic
+            mediaRecorder.stream.getTracks().forEach(t => t.stop());
+            
+            // mediaRecorder.stop() flushes remaining data, triggering one last ondataavailable.
+            // checkFinish() will handle the redirect once pendingUploads hits 0.
+        }
+
+        function checkFinish() {
+            if (isStopping && pendingUploads === 0) {
+                window.location.href = `/session.html?id=${activeSessionId}`;
+            }
+        }
+    </script>
+</body>
+</html>
