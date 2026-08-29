@@ -39,8 +39,6 @@ app.add_middleware(
 
 # Serve the static frontend from backend/static/
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
-STATIC_DIR.mkdir(exist_ok=True)
-
 
 # ── Health ───────────────────────────────────────────────────────────────
 
